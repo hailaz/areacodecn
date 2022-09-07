@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"path"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gogf/gf/v2/os/gmutex"
 	"github.com/gogf/gf/v2/os/grpool"
+	"github.com/gogf/gf/v2/util/grand"
 	"github.com/hailaz/areacodecn/data"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
@@ -24,13 +26,36 @@ import (
 
 const (
 	statsURL = "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm"
-	maxLevel = 1
+	maxLevel = 2
 )
 
 var aList []data.AreaCode
 var mu = gmutex.New()
-var pool = grpool.New(1)
+var DoMu = gmutex.New()
+var DoneMu = gmutex.New()
+var pool = grpool.New(20)
 var wg = sync.WaitGroup{}
+var gCurCookies []*http.Cookie
+var gCurCookieJar *cookiejar.Jar
+var UA = []string{
+	"Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.1 (KHTML, like Gecko) Chrome/14.0.835.163 Safari/535.1",
+	"Mozilla/5.0 (Windows NT 6.1; WOW64; rv:6.0) Gecko/20100101 Firefox/6.0",
+	"Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/534.50 (KHTML, like Gecko) Version/5.1 Safari/534.50",
+	"Opera/9.80 (Windows NT 6.1; U; zh-cn) Presto/2.9.168 Version/11.50",
+	"Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Win64; x64; Trident/5.0; .NET CLR 2.0.50727; SLCC2; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; InfoPath.3; .NET4.0C; Tablet PC 2.0; .NET4.0E)",
+	"Mozilla/5.0 (Windows; U; Windows NT 6.1; ) AppleWebKit/534.12 (KHTML, like Gecko) Maxthon/3.0 Safari/534.12",
+	"Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.1; WOW64; Trident/5.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; InfoPath.3; .NET4.0C; .NET4.0E; SE 2.X MetaSr 1.0)",
+	"Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1; Trident/4.0; GTB7.0)",
+	"Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.33 Safari/534.3 SE 2.X MetaSr 1.0",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.102 Safari/537.36 Edg/104.0.1293.70",
+}
+
+func init() {
+	gCurCookies = nil
+	//var err error;
+	gCurCookieJar, _ = cookiejar.New(nil)
+
+}
 
 // main description
 //
@@ -39,9 +64,23 @@ var wg = sync.WaitGroup{}
 // author: hailaz
 func main() {
 	now := time.Now()
-	GetYearAreaCodeData(2021)
-
+	// GetYearAreaCodeData(2021)
+	RunDo()
 	log.Println(time.Since(now))
+}
+
+// RunDo description
+//
+// createTime: 2022-09-07 23:34:26
+//
+// author: hailaz
+func RunDo() {
+	// "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2021/index.html": {Code: 100000000000, Level: 0},
+	for k, v := range data.Do {
+		GetAreaCode(path.Dir(k), path.Base(k), v.Code, v.Level)
+	}
+	wg.Wait()
+	WriteRecord()
 }
 
 // GetYearAreacodeData description
@@ -50,7 +89,10 @@ func main() {
 //
 // author: hailaz
 func GetYearAreaCodeData(year int) {
+	// www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2021/index.html
 	GetAreaCode(GetYearSatasURL(year), "index.html", 100000000000, 0)
+	// GetAreaCode("www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2020/43/", "4301.html", 100000000000, 2)
+
 	wg.Wait()
 	// g.Dump(list)
 	CreateDataFile(year, aList)
@@ -65,12 +107,49 @@ func GetYearSatasURL(year int) string {
 	return fmt.Sprintf("%s/%d/", statsURL, year)
 }
 
+// WriteRecord description
+//
+// createTime: 2022-09-07 23:18:59
+//
+// author: hailaz
+func WriteRecord() {
+	var tpl = `package data
+
+var Do = map[string]AreaCode{
+%s}
+var Done = map[string]AreaCode{
+%s}
+
+`
+
+	var listDo = ""
+	for k, v := range data.Do {
+		listDo += fmt.Sprintf(`	"%s": {Code: %d, Level: %d},`+"\n", k, v.Code, v.Level)
+	}
+	var listDone = ""
+	for k, v := range data.Done {
+		listDone += fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+	}
+	filePath := "data/record.go"
+	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
+	if err != nil {
+		return
+	}
+	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDo, listDone)), 0644)
+	if err != nil {
+		return
+	}
+}
+
 // CreateDataFile description
 //
 // createTime: 2022-08-30 10:30:35
 //
 // author: hailaz
 func CreateDataFile(year int, list []data.AreaCode) {
+	if len(list) == 0 {
+		return
+	}
 	var tpl = `package data
 
 import "github.com/hailaz/areacodecn/data"
@@ -113,7 +192,22 @@ func GBKToUTF8(src string, charSet string) (string, error) {
 // author: hailaz
 func GetDoc(urlDir string, page string) (*goquery.Document, error) {
 	reqUrl := path.Join(urlDir, page)
-	resp, err := http.Get("http://" + reqUrl)
+	client := &http.Client{
+		Jar: gCurCookieJar,
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+reqUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("User-Agent", UA[grand.N(0, len(UA)-1)])
+	req.Header.Add("Host", "www.stats.gov.cn")
+	req.Header.Add("Accept-Language", "zh-CN")
+	req.Header.Add("Referer", reqUrl)
+	// req.Header.Add("Cookie", "SF_cookie_1=15502425; wzws_cid=dc0ad41f5b219db56ca4cacfdf80c137140e2ee81c23c340f158e3f767d0b62044360d39204309e7491f6cf64eb213e14f0a4d777690756d5f5c730266e6ace4b4f530aeac69260a762932618431b7cd")
+	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +216,10 @@ func GetDoc(urlDir string, page string) (*goquery.Document, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Println(resp.StatusCode, reqUrl)
+
+	//全局保存
+	// gCurCookies = gCurCookieJar.Cookies(req.URL)
 	return doc, nil
 }
 
@@ -133,14 +231,21 @@ func GetDoc(urlDir string, page string) (*goquery.Document, error) {
 func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.AreaCodeTree {
 	wg.Add(1)
 	defer wg.Done()
+
 	reqUrl := path.Join(urlDir, page)
-	log.Println(reqUrl)
+	// log.Println(reqUrl)
 	// Load the HTML document
 	doc, err := GetDoc(urlDir, page)
 	if err != nil {
 		log.Println(err)
 		return nil
 	}
+	if strings.Contains(doc.Text(), "请开启JavaScript并刷新该页") {
+		return nil
+	} else {
+		DeleteDo(reqUrl)
+	}
+	// time.Sleep(time.Millisecond * 500)
 
 	charSet := "UTF-8"
 
@@ -158,7 +263,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 		doc.Find(".provincetr").Each(func(i int, s *goquery.Selection) {
 			// For each item found, get the title
 			s.Find("a").Each(func(i int, s *goquery.Selection) {
-				var areaCode = data.AreaCodeTree{ParentCode: parentCode, Level: level}
+				var areaCode = data.AreaCodeTree{ParentCode: parentCode, Level: level + 1}
 				pathNext, ok := s.Attr("href")
 				if ok {
 					areaCode.Path = pathNext
@@ -169,7 +274,8 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 					areaCode.Code = code * 10000000000
 				}
 				// areaCode.Children = GetAreaCode(urlDir, areaCode.Path, areaCode.Code, level+1)
-				tempUrl, tempPath, tempCode, tempLevel := urlDir, areaCode.Path, areaCode.Code, level+1
+				tempUrl, tempPath, tempCode, tempLevel := urlDir, areaCode.Path, areaCode.Code, areaCode.Level
+				AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
 				pool.Add(context.Background(), func(ctx context.Context) {
 					GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
 				})
@@ -183,7 +289,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 		// Find the review items
 		doc.Find("body > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
 			// For each item found, get the title
-			var areaCode = data.AreaCodeTree{ParentCode: parentCode, Level: level}
+			var areaCode = data.AreaCodeTree{ParentCode: parentCode, Level: level + 1}
 			s.Find("a").Each(func(i int, s *goquery.Selection) {
 				pathNext, ok := s.Attr("href")
 				if ok {
@@ -199,11 +305,14 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 			if areaCode.Name != "" {
 				if level < maxLevel {
 					// areaCode.Children = GetAreaCode(urlDir, areaCode.Path, areaCode.Code, level+1)
-					tempUrl, tempPath, tempCode, tempLevel := urlDir, areaCode.Path, areaCode.Code, level+1
+					tempUrl, tempPath, tempCode, tempLevel := path.Dir(reqUrl), areaCode.Path, areaCode.Code, areaCode.Level
+					// log.Println(tempUrl, tempPath, tempCode, tempLevel)
+					AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
 					pool.Add(context.Background(), func(ctx context.Context) {
 						GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
 					})
 				}
+				// log.Println(level+1, urlDir, page, reqUrl, path.Dir(reqUrl), areaCode.Path)
 				areaCode.Path = "http://" + path.Join(path.Dir(reqUrl), areaCode.Path)
 				// list = append(list, &areaCode)
 				ListAppend(areaCode)
@@ -236,6 +345,51 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 func ListAppend(areaCode data.AreaCodeTree) {
 	mu.LockFunc(func() {
 		aList = append(aList, data.AreaCode{Code: areaCode.Code, Name: areaCode.Name, Path: areaCode.Path, ParentCode: areaCode.ParentCode, Level: areaCode.Level})
-		log.Println(len(aList))
+		log.Println(areaCode.Level, len(aList))
+	})
+	AddDone(strconv.Itoa(areaCode.Code), data.AreaCode{Code: areaCode.Code, Name: areaCode.Name, Path: areaCode.Path, ParentCode: areaCode.ParentCode, Level: areaCode.Level})
+}
+
+// AddDo description
+//
+// createTime: 2022-09-07 23:08:21
+//
+// author: hailaz
+func AddDo(doPath string, ac data.AreaCode) {
+	DoMu.LockFunc(func() {
+		data.Do[doPath] = ac
+	})
+}
+
+// DeleteDo description
+//
+// createTime: 2022-09-07 23:08:21
+//
+// author: hailaz
+func DeleteDo(doPath string) {
+	DoMu.LockFunc(func() {
+		delete(data.Do, doPath)
+	})
+}
+
+// AddDone description
+//
+// createTime: 2022-09-07 23:08:21
+//
+// author: hailaz
+func AddDone(doPath string, ac data.AreaCode) {
+	DoMu.LockFunc(func() {
+		data.Done[doPath] = ac
+	})
+}
+
+// DeleteDone description
+//
+// createTime: 2022-09-07 23:08:21
+//
+// author: hailaz
+func DeleteDone(doPath string) {
+	DoMu.LockFunc(func() {
+		delete(data.Done, doPath)
 	})
 }
