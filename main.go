@@ -26,7 +26,7 @@ import (
 
 const (
 	statsURL = "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm"
-	maxLevel = 10
+	maxLevel = 4
 )
 
 var aList []data.AreaCode
@@ -34,7 +34,7 @@ var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
 var DataMapMu = gmutex.New()
-var pool = grpool.New(20)
+var pool = grpool.New(50)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
 var gCurCookieJar *cookiejar.Jar
@@ -82,6 +82,7 @@ func RunDo() {
 	}
 	wg.Wait()
 	WriteRecord()
+	WriteDataMap()
 }
 
 // GetYearAreacodeData description
@@ -120,8 +121,6 @@ var Do = map[string]AreaCode{
 %s}
 var Done = map[string]struct{}{
 %s}
-var DataMap = map[string]AreaCode{
-%s}
 
 `
 
@@ -133,16 +132,39 @@ var DataMap = map[string]AreaCode{
 	for k := range data.Done {
 		listDone += fmt.Sprintf(`	"%s": {},`+"\n", k)
 	}
-	var listDataMap = ""
-	for k, v := range data.DataMap {
-		listDataMap += fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
-	}
 	filePath := "data/record.go"
 	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
 	if err != nil {
 		return
 	}
-	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDo, listDone, listDataMap)), 0644)
+	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDo, listDone)), 0644)
+	if err != nil {
+		return
+	}
+}
+
+// WriteDataMap description
+//
+// createTime: 2022-09-08 10:09:02
+//
+// author: hailaz
+func WriteDataMap() {
+	var tpl = `package data
+
+var DataMap = map[string]AreaCode{
+%s}
+
+`
+	var listDataMap = ""
+	for k, v := range data.DataMap {
+		listDataMap += fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+	}
+	filePath := "data/data_map.go"
+	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
+	if err != nil {
+		return
+	}
+	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDataMap)), 0644)
 	if err != nil {
 		return
 	}
