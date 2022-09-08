@@ -34,7 +34,7 @@ var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
 var DataMapMu = gmutex.New()
-var pool = grpool.New(50)
+var pool = grpool.New(20)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
 var gCurCookieJar *cookiejar.Jar
@@ -357,7 +357,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 				tempUrl, tempPath, tempCode, tempLevel := path.Dir(reqUrl), areaCode.Path, areaCode.Code, areaCode.Level
 				// log.Println(tempUrl, tempPath, tempCode, tempLevel)
 				AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
-				if level < maxLevel {
+				if areaCode.Level < maxLevel {
 					// areaCode.Children = GetAreaCode(urlDir, areaCode.Path, areaCode.Code, level+1)
 					pool.Add(context.Background(), func(ctx context.Context) {
 						GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
