@@ -26,13 +26,14 @@ import (
 
 const (
 	statsURL = "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm"
-	maxLevel = 2
+	maxLevel = 10
 )
 
 var aList []data.AreaCode
 var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
+var DataMapMu = gmutex.New()
 var pool = grpool.New(20)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
@@ -117,7 +118,9 @@ func WriteRecord() {
 
 var Do = map[string]AreaCode{
 %s}
-var Done = map[string]AreaCode{
+var Done = map[string]struct{}{
+%s}
+var DataMap = map[string]AreaCode{
 %s}
 
 `
@@ -127,15 +130,19 @@ var Done = map[string]AreaCode{
 		listDo += fmt.Sprintf(`	"%s": {Code: %d, Level: %d},`+"\n", k, v.Code, v.Level)
 	}
 	var listDone = ""
-	for k, v := range data.Done {
-		listDone += fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+	for k := range data.Done {
+		listDone += fmt.Sprintf(`	"%s": {},`+"\n", k)
+	}
+	var listDataMap = ""
+	for k, v := range data.DataMap {
+		listDataMap += fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
 	}
 	filePath := "data/record.go"
 	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
 	if err != nil {
 		return
 	}
-	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDo, listDone)), 0644)
+	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDo, listDone, listDataMap)), 0644)
 	if err != nil {
 		return
 	}
@@ -233,6 +240,11 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 	defer wg.Done()
 
 	reqUrl := path.Join(urlDir, page)
+
+	if IsDone(reqUrl) {
+		// log.Println("已经处理过了", reqUrl)
+		return nil
+	}
 	// log.Println(reqUrl)
 	// Load the HTML document
 	doc, err := GetDoc(urlDir, page)
@@ -244,6 +256,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 		return nil
 	} else {
 		DeleteDo(reqUrl)
+		AddDone(reqUrl)
 	}
 	// time.Sleep(time.Millisecond * 500)
 
@@ -303,11 +316,11 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 				}
 			})
 			if areaCode.Name != "" {
+				tempUrl, tempPath, tempCode, tempLevel := path.Dir(reqUrl), areaCode.Path, areaCode.Code, areaCode.Level
+				// log.Println(tempUrl, tempPath, tempCode, tempLevel)
+				AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
 				if level < maxLevel {
 					// areaCode.Children = GetAreaCode(urlDir, areaCode.Path, areaCode.Code, level+1)
-					tempUrl, tempPath, tempCode, tempLevel := path.Dir(reqUrl), areaCode.Path, areaCode.Code, areaCode.Level
-					// log.Println(tempUrl, tempPath, tempCode, tempLevel)
-					AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
 					pool.Add(context.Background(), func(ctx context.Context) {
 						GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
 					})
@@ -345,9 +358,9 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 func ListAppend(areaCode data.AreaCodeTree) {
 	mu.LockFunc(func() {
 		aList = append(aList, data.AreaCode{Code: areaCode.Code, Name: areaCode.Name, Path: areaCode.Path, ParentCode: areaCode.ParentCode, Level: areaCode.Level})
-		log.Println(areaCode.Level, len(aList))
+		// log.Println(areaCode.Level, len(aList))
 	})
-	AddDone(strconv.Itoa(areaCode.Code), data.AreaCode{Code: areaCode.Code, Name: areaCode.Name, Path: areaCode.Path, ParentCode: areaCode.ParentCode, Level: areaCode.Level})
+	AddDataMap(strconv.Itoa(areaCode.Code), data.AreaCode{Code: areaCode.Code, Name: areaCode.Name, Path: areaCode.Path, ParentCode: areaCode.ParentCode, Level: areaCode.Level})
 }
 
 // AddDo description
@@ -377,9 +390,9 @@ func DeleteDo(doPath string) {
 // createTime: 2022-09-07 23:08:21
 //
 // author: hailaz
-func AddDone(doPath string, ac data.AreaCode) {
-	DoMu.LockFunc(func() {
-		data.Done[doPath] = ac
+func AddDone(doPath string) {
+	DoneMu.LockFunc(func() {
+		data.Done[doPath] = struct{}{}
 	})
 }
 
@@ -389,7 +402,41 @@ func AddDone(doPath string, ac data.AreaCode) {
 //
 // author: hailaz
 func DeleteDone(doPath string) {
-	DoMu.LockFunc(func() {
+	DoneMu.LockFunc(func() {
 		delete(data.Done, doPath)
+	})
+}
+
+// IsDone description
+//
+// createTime: 2022-09-08 09:38:34
+//
+// author: hailaz
+func IsDone(doPath string) bool {
+	DoneMu.Lock()
+	defer DoneMu.Unlock()
+	_, ok := data.Done[doPath]
+	return ok
+}
+
+// AddDataMap description
+//
+// createTime: 2022-09-07 23:08:21
+//
+// author: hailaz
+func AddDataMap(doPath string, ac data.AreaCode) {
+	DataMapMu.LockFunc(func() {
+		data.DataMap[doPath] = ac
+	})
+}
+
+// DeleteDataMap description
+//
+// createTime: 2022-09-07 23:08:21
+//
+// author: hailaz
+func DeleteDataMap(doPath string) {
+	DataMapMu.LockFunc(func() {
+		delete(data.DataMap, doPath)
 	})
 }
