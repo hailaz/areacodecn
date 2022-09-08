@@ -141,7 +141,7 @@ func GetYearAreaCodeData(year int) {
 
 	wg.Wait()
 	// g.Dump(list)
-	CreateDataFile(year, aList)
+	// CreateDataFile(year, aList)
 }
 
 // GetYearSatasURL description
@@ -224,36 +224,69 @@ var DataMap = map[string]AreaCode{
 	}
 }
 
+// WriteDataYear description
+//
+// createTime: 2022-09-08 16:23:51
+//
+// author: hailaz
+func WriteDataYear(year int) {
+	DataMapMu.Lock()
+	defer DataMapMu.Unlock()
+	log.Printf("WriteDataMap len %d", len(data.DataMap))
+	var tpl = `package data` + strconv.Itoa(year) + `
+
+import "github.com/hailaz/areacodecn/data"
+	
+var AreaCodeList []data.AreaCode = []data.AreaCode{
+`
+	var bt bytes.Buffer
+	bt.WriteString(tpl)
+	for _, v := range data.DataMap {
+		wtmp := fmt.Sprintf(`	{Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+		bt.WriteString(wtmp)
+	}
+	bt.WriteString("}")
+	filePath := fmt.Sprintf("data%d/data_slice.go", year)
+	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
+	if err != nil {
+		return
+	}
+	err = ioutil.WriteFile(filePath, bt.Bytes(), 0644)
+	if err != nil {
+		return
+	}
+}
+
 // CreateDataFile description
 //
 // createTime: 2022-08-30 10:30:35
 //
 // author: hailaz
-func CreateDataFile(year int, list []data.AreaCode) {
-	if len(list) == 0 {
-		return
-	}
-	var tpl = `package data
+// func CreateDataFile(year int, list []data.AreaCode) {
+// 	if len(list) == 0 {
+// 		return
+// 	}
+// 	var tpl = `package data
 
-import "github.com/hailaz/areacodecn/data"
+// import "github.com/hailaz/areacodecn/data"
 
-var AreaCodeList []data.AreaCode = []data.AreaCode{
-%s}
-`
-	var listData = ""
-	for _, v := range list {
-		listData += fmt.Sprintf(`	{Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", v.Code, v.Name, v.Path, v.ParentCode, v.Level)
-	}
-	filePath := fmt.Sprintf("data/%d/data.go", year)
-	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
-	if err != nil {
-		return
-	}
-	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listData)), 0644)
-	if err != nil {
-		return
-	}
-}
+// var AreaCodeList []data.AreaCode = []data.AreaCode{
+// %s}
+// `
+// 	var listData = ""
+// 	for _, v := range list {
+// 		listData += fmt.Sprintf(`	{Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+// 	}
+// 	filePath := fmt.Sprintf("data/%d/data.go", year)
+// 	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
+// 	if err != nil {
+// 		return
+// 	}
+// 	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listData)), 0644)
+// 	if err != nil {
+// 		return
+// 	}
+// }
 
 // GBK 转 UTF-8
 func GBKToUTF8(src string, charSet string) (string, error) {

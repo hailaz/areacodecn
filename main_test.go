@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hailaz/areacodecn/data2020"
+	"github.com/hailaz/areacodecn/data2021"
 )
 
 // TestGetYearAreaCodeData description
@@ -50,4 +53,23 @@ func TestGetDoc(t *testing.T) {
 // author: hailaz
 func TestWriteDataMap(t *testing.T) {
 	WriteDataMap()
+}
+
+// TestWriteDataYear description
+//
+// createTime: 2022-09-08 16:25:26
+//
+// author: hailaz
+func TestWriteDataYear(t *testing.T) {
+	WriteDataYear(2021)
+}
+
+// TestLenData description
+//
+// createTime: 2022-09-08 16:36:15
+//
+// author: hailaz
+func TestLenData(t *testing.T) {
+	t.Log(len(data2020.AreaCodeList))
+	t.Log(len(data2021.AreaCodeList))
 }
