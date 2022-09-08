@@ -35,7 +35,7 @@ var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
 var DataMapMu = gmutex.New()
-var pool = grpool.New(100)
+var pool = grpool.New(2)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
 var gCurCookieJar *cookiejar.Jar
@@ -112,6 +112,7 @@ func RunDo() {
 	log.Printf("RunDo DoLen %d DataMapLen %d", len(data.Do), len(data.DataMap))
 	for k, v := range data.Do {
 		tempUrl, tempPath, tempCode, tempLevel := path.Dir(k), path.Base(k), v.Code, v.Level
+		wg.Add(1)
 		pool.Add(context.Background(), func(ctx context.Context) {
 			GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
 		})
@@ -134,6 +135,7 @@ func RunDo() {
 // author: hailaz
 func GetYearAreaCodeData(year int) {
 	// www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2021/index.html
+	wg.Add(1)
 	GetAreaCode(GetYearSatasURL(year), "index.html", 100000000000, 0)
 	// GetAreaCode("www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2020/43/", "4301.html", 100000000000, 2)
 
@@ -314,7 +316,6 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 	if iscontinus == 0 {
 		return nil
 	}
-	wg.Add(1)
 	defer wg.Done()
 
 	reqUrl := path.Join(urlDir, page)
@@ -369,6 +370,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 				// areaCode.Children = GetAreaCode(urlDir, areaCode.Path, areaCode.Code, level+1)
 				tempUrl, tempPath, tempCode, tempLevel := urlDir, areaCode.Path, areaCode.Code, areaCode.Level
 				AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
+				wg.Add(1)
 				pool.Add(context.Background(), func(ctx context.Context) {
 					GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
 				})
@@ -401,6 +403,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 				AddDo(path.Join(tempUrl, tempPath), data.AreaCode{Code: tempCode, Level: tempLevel})
 				if areaCode.Level < maxLevel {
 					// areaCode.Children = GetAreaCode(urlDir, areaCode.Path, areaCode.Code, level+1)
+					wg.Add(1)
 					pool.Add(context.Background(), func(ctx context.Context) {
 						GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
 					})
