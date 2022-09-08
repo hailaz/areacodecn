@@ -58,12 +58,27 @@ func init() {
 
 }
 
+// ViewDataLen description
+//
+// createTime: 2022-09-08 10:22:16
+//
+// author: hailaz
+func ViewDataLen() {
+	ticker := time.NewTicker(time.Second * 5)
+	for range ticker.C {
+		DataMapMu.RLockFunc(func() {
+			log.Println(len(data.DataMap))
+		})
+	}
+}
+
 // main description
 //
 // createTime: 2022-08-30 12:56:57
 //
 // author: hailaz
 func main() {
+	go ViewDataLen()
 	now := time.Now()
 	// GetYearAreaCodeData(2021)
 	RunDo()
@@ -245,7 +260,7 @@ func GetDoc(urlDir string, page string) (*goquery.Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println(resp.StatusCode, reqUrl)
+	// log.Println(resp.StatusCode, reqUrl)
 
 	//全局保存
 	// gCurCookies = gCurCookieJar.Cookies(req.URL)
@@ -265,6 +280,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 
 	if IsDone(reqUrl) {
 		// log.Println("已经处理过了", reqUrl)
+		DeleteDo(reqUrl)
 		return nil
 	}
 	// log.Println(reqUrl)
