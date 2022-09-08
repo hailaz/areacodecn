@@ -35,7 +35,7 @@ var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
 var DataMapMu = gmutex.New()
-var pool = grpool.New(200)
+var pool = grpool.New(100)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
 var gCurCookieJar *cookiejar.Jar
@@ -109,6 +109,7 @@ func main() {
 // author: hailaz
 func RunDo() {
 	// "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2021/index.html": {Code: 100000000000, Level: 0},
+	log.Printf("RunDo DoLen %d DataMapLen %d", len(data.Do), len(data.DataMap))
 	for k, v := range data.Do {
 		tempUrl, tempPath, tempCode, tempLevel := path.Dir(k), path.Base(k), v.Code, v.Level
 		pool.Add(context.Background(), func(ctx context.Context) {
@@ -158,31 +159,33 @@ func GetYearSatasURL(year int) string {
 func WriteRecord() {
 	DoMu.Lock()
 	DoneMu.Lock()
+	log.Printf("WriteRecord len %d", len(data.Do))
 	defer DoMu.Unlock()
 	defer DoneMu.Unlock()
 	var tpl = `package data
 
 var Do = map[string]AreaCode{
-%s}
-var Done = map[string]struct{}{
-%s}
-
 `
 
-	var listDo = ""
+	var bt bytes.Buffer
+	bt.WriteString(tpl)
+
 	for k, v := range data.Do {
-		listDo += fmt.Sprintf(`	"%s": {Code: %d, Level: %d},`+"\n", k, v.Code, v.Level)
+		wtmp := fmt.Sprintf(`	"%s": {Code: %d, Level: %d},`+"\n", k, v.Code, v.Level)
+		bt.WriteString(wtmp)
 	}
-	var listDone = ""
+	bt.WriteString("}\nvar Done = map[string]struct{}{\n")
 	for k := range data.Done {
-		listDone += fmt.Sprintf(`	"%s": {},`+"\n", k)
+		wtmp := fmt.Sprintf(`	"%s": {},`+"\n", k)
+		bt.WriteString(wtmp)
 	}
+	bt.WriteString("}")
 	filePath := "data/record.go"
 	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
 	if err != nil {
 		return
 	}
-	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDo, listDone)), 0644)
+	err = ioutil.WriteFile(filePath, bt.Bytes(), 0644)
 	if err != nil {
 		return
 	}
@@ -196,6 +199,7 @@ var Done = map[string]struct{}{
 func WriteDataMap() {
 	DataMapMu.Lock()
 	defer DataMapMu.Unlock()
+	log.Printf("WriteDataMap len %d", len(data.DataMap))
 	var tpl = `package data
 
 var DataMap = map[string]AreaCode{
