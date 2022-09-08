@@ -42,3 +42,12 @@ func TestGetDoc(t *testing.T) {
 	t.Log(strings.Contains(doc.Text(), "请开启JavaScript并刷新该页"))
 
 }
+
+// TestWriteDataMap description
+//
+// createTime: 2022-09-08 13:07:29
+//
+// author: hailaz
+func TestWriteDataMap(t *testing.T) {
+	WriteDataMap()
+}

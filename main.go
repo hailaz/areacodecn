@@ -118,9 +118,12 @@ func RunDo() {
 			break
 		}
 	}
+	log.Println("stop for")
 	wg.Wait()
+	log.Println("write data")
 	WriteRecord()
 	WriteDataMap()
+	log.Println("write data done")
 }
 
 // GetYearAreacodeData description
@@ -196,19 +199,20 @@ func WriteDataMap() {
 	var tpl = `package data
 
 var DataMap = map[string]AreaCode{
-%s}
-
 `
-	var listDataMap = ""
+	var bt bytes.Buffer
+	bt.WriteString(tpl)
 	for k, v := range data.DataMap {
-		listDataMap += fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+		wtmp := fmt.Sprintf(`	"%s": {Code: %d, Name: "%s", Path: "%s", ParentCode: %d, Level: %d},`+"\n", k, v.Code, v.Name, v.Path, v.ParentCode, v.Level)
+		bt.WriteString(wtmp)
 	}
+	bt.WriteString("}")
 	filePath := "data/data_map.go"
 	err := os.MkdirAll(path.Dir(filePath), os.ModePerm)
 	if err != nil {
 		return
 	}
-	err = ioutil.WriteFile(filePath, []byte(fmt.Sprintf(tpl, listDataMap)), 0644)
+	err = ioutil.WriteFile(filePath, bt.Bytes(), 0644)
 	if err != nil {
 		return
 	}
@@ -266,7 +270,8 @@ func GBKToUTF8(src string, charSet string) (string, error) {
 func GetDoc(urlDir string, page string) (*goquery.Document, error) {
 	reqUrl := path.Join(urlDir, page)
 	client := &http.Client{
-		Jar: gCurCookieJar,
+		Jar:     gCurCookieJar,
+		Timeout: 10 * time.Second,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+reqUrl, nil)
