@@ -35,7 +35,7 @@ var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
 var DataMapMu = gmutex.New()
-var pool = grpool.New(100)
+var pool = grpool.New(200)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
 var gCurCookieJar *cookiejar.Jar
@@ -67,9 +67,10 @@ func init() {
 func ViewDataLen() {
 	ticker := time.NewTicker(time.Second * 2)
 	for range ticker.C {
-		DataMapMu.RLockFunc(func() {
-			log.Println(len(data.DataMap))
-		})
+		log.Println(len(data.DataMap))
+		// DataMapMu.RLockFunc(func() {
+		// 	log.Println(len(data.DataMap))
+		// })
 	}
 }
 
@@ -79,7 +80,7 @@ func ViewDataLen() {
 //
 // author: hailaz
 func UpdateAllMap() {
-	ticker := time.NewTicker(time.Minute * 3)
+	ticker := time.NewTicker(time.Minute * 10)
 	for range ticker.C {
 		WriteRecord()
 		WriteDataMap()
@@ -109,7 +110,10 @@ func main() {
 func RunDo() {
 	// "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2021/index.html": {Code: 100000000000, Level: 0},
 	for k, v := range data.Do {
-		GetAreaCode(path.Dir(k), path.Base(k), v.Code, v.Level)
+		tempUrl, tempPath, tempCode, tempLevel := path.Dir(k), path.Base(k), v.Code, v.Level
+		pool.Add(context.Background(), func(ctx context.Context) {
+			GetAreaCode(tempUrl, tempPath, tempCode, tempLevel)
+		})
 		if iscontinus == 0 {
 			break
 		}
