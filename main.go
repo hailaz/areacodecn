@@ -26,15 +26,16 @@ import (
 
 const (
 	statsURL = "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm"
-	maxLevel = 4
+	maxLevel = 10
 )
 
+var iscontinus = 1
 var aList []data.AreaCode
 var mu = gmutex.New()
 var DoMu = gmutex.New()
 var DoneMu = gmutex.New()
 var DataMapMu = gmutex.New()
-var pool = grpool.New(20)
+var pool = grpool.New(100)
 var wg = sync.WaitGroup{}
 var gCurCookies []*http.Cookie
 var gCurCookieJar *cookiejar.Jar
@@ -64,7 +65,7 @@ func init() {
 //
 // author: hailaz
 func ViewDataLen() {
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(time.Second * 2)
 	for range ticker.C {
 		DataMapMu.RLockFunc(func() {
 			log.Println(len(data.DataMap))
@@ -94,6 +95,9 @@ func RunDo() {
 	// "www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2021/index.html": {Code: 100000000000, Level: 0},
 	for k, v := range data.Do {
 		GetAreaCode(path.Dir(k), path.Base(k), v.Code, v.Level)
+		if iscontinus == 0 {
+			break
+		}
 	}
 	wg.Wait()
 	WriteRecord()
@@ -273,6 +277,9 @@ func GetDoc(urlDir string, page string) (*goquery.Document, error) {
 //
 // author: hailaz
 func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.AreaCodeTree {
+	if iscontinus == 0 {
+		return nil
+	}
 	wg.Add(1)
 	defer wg.Done()
 
@@ -291,6 +298,7 @@ func GetAreaCode(urlDir string, page string, parentCode int, level int) []*data.
 		return nil
 	}
 	if strings.Contains(doc.Text(), "请开启JavaScript并刷新该页") {
+		iscontinus = 0
 		return nil
 	} else {
 		DeleteDo(reqUrl)
