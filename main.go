@@ -73,6 +73,20 @@ func ViewDataLen() {
 	}
 }
 
+// UpdateAllMap description
+//
+// createTime: 2022-09-08 11:09:09
+//
+// author: hailaz
+func UpdateAllMap() {
+	ticker := time.NewTicker(time.Minute * 3)
+	for range ticker.C {
+		WriteRecord()
+		WriteDataMap()
+		log.Println("UpdateAllMap")
+	}
+}
+
 // main description
 //
 // createTime: 2022-08-30 12:56:57
@@ -80,6 +94,7 @@ func ViewDataLen() {
 // author: hailaz
 func main() {
 	go ViewDataLen()
+	go UpdateAllMap()
 	now := time.Now()
 	// GetYearAreaCodeData(2021)
 	RunDo()
@@ -134,6 +149,10 @@ func GetYearSatasURL(year int) string {
 //
 // author: hailaz
 func WriteRecord() {
+	DoMu.Lock()
+	DoneMu.Lock()
+	defer DoMu.Unlock()
+	defer DoneMu.Unlock()
 	var tpl = `package data
 
 var Do = map[string]AreaCode{
@@ -168,6 +187,8 @@ var Done = map[string]struct{}{
 //
 // author: hailaz
 func WriteDataMap() {
+	DataMapMu.Lock()
+	defer DataMapMu.Unlock()
 	var tpl = `package data
 
 var DataMap = map[string]AreaCode{
