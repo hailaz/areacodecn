@@ -1,10 +1,12 @@
 package temp
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -111,4 +113,80 @@ func TestNewFile(t *testing.T) {
 		}
 		defer file.Close()
 	}
+}
+
+// TestReadFile description
+//
+// createTime: 2023-08-23 14:31:55
+//
+// author: hailaz
+func TestReadFile(t *testing.T) {
+	dir := "out"
+	codeMap := make(map[string]string)
+	for i := 1980; i <= 2021; i++ {
+		year := i
+		fileName := strconv.Itoa(year) + ".txt"
+		filePath := path.Join(dir, fileName)
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		// fmt.Println(string(data))
+		for _, line := range strings.Split(string(data), "\n") {
+			if len(line) == 0 {
+				continue
+			}
+			// fmt.Println(line)
+			code := line[:6]
+			name := line[7:]
+			if codeUp := code[:4] + "00"; code != codeUp {
+				if nameUp, ok := codeMap[codeUp]; ok {
+					name = nameUp + "/" + name
+				}
+
+				if codeUp := code[:2] + "0000"; code != codeUp {
+					if nameUp, ok := codeMap[codeUp]; ok {
+						name = nameUp + "/" + name
+					}
+				}
+			}
+			// fmt.Println(code, name)
+			if nameOld, ok := codeMap[code]; ok {
+				if nameOld != name {
+					t.Logf("%d年，区域代码[%s]改名，[%s]=>[%s]", year, code, nameOld, name)
+					codeMap[code] = name
+				}
+			} else {
+				codeMap[code] = name
+				if year > 1980 {
+					t.Logf("%d年，新增区域代码[%s]，[%s]", year, code, name)
+				}
+			}
+		}
+		t.Logf("%d年，共%d个区域", year, len(codeMap))
+	}
+
+	file, err := os.Create(path.Join(dir, "code.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	listCode := make([]string, 0, len(codeMap))
+	for code, name := range codeMap {
+		listCode = append(listCode, fmt.Sprintf("%s,%s\n", code, name))
+	}
+
+	sort.Strings(listCode)
+	for _, line := range listCode {
+		file.WriteString(line)
+	}
+	fileJson, err := os.Create(path.Join(dir, "code.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fileJson.Close()
+	b, _ := json.MarshalIndent(codeMap, "", "  ")
+	fileJson.Write(b)
+
 }
